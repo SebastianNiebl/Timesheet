@@ -1,0 +1,704 @@
+﻿using System;
+using System.IO;
+using Newtonsoft.Json;
+
+namespace CATerpillar
+{
+    #region Program
+    class Program
+    {
+        public ApplicationLayer app;
+        public PresentationLayer ui;
+        public PersistencyLayer file;
+        static void Main(string[] args)
+        {
+            Program p = new Program();
+            p.Main();
+        }
+        public void Main()
+        {
+            this.app = new ApplicationLayer();
+            this.ui = new PresentationLayer(app);
+            this.file = new PersistencyLayer();
+            int elements = ui.OutputMenu();
+            while (true)
+            {
+                int answer = ui.PickList(elements);
+                bool noPieces = (app.GetPieces() == null);
+                bool noTickets = (app.GetTickets() == null);
+                Session[] sessions = file.GetFiles();
+                switch (answer)
+                {
+                    case 0: //Start working on a piece
+                        if (noPieces)
+                        {
+                            ui.NoPieces();
+                        }
+                        else
+                        {
+                            app.AddTicket(ui.startWork(app.GetPieces()));
+                        }
+                        break;
+                    case 1://End working on a piece
+                        if (!app.OpenTicketExists())
+                        {
+                            ui.NoTickets();
+                        }
+                        else
+                        {
+                            ui.endWork(app.GetOpenTickets());
+                        }
+                        break;
+                    case 2://Create a new piece
+                        app.AddPiece(ui.CreatePiece());
+                        break;
+                    case 3://Edit a piece
+                        if (noPieces)
+                        {
+                            ui.NoPieces();
+                        }
+                        else
+                        {
+                            ui.EditPiece(app.GetPieces());
+                        }
+                        break;
+                    case 4://Delete a piece
+                        if (noPieces)
+                        {
+                            ui.NoPieces();
+                        }
+                        else
+                        {
+                            Piece toDelete = ui.DeletePiece(app.GetPieces());
+                            if (toDelete != null)
+                            {
+                                app.DeletePiece(toDelete);
+                            }
+                        }
+                        break;
+                    case 5://List pieces
+                        if (noPieces)
+                        {
+                            ui.NoPieces();
+                        }
+                        else
+                        {
+                            ui.OutputListable(app.GetPieces());
+                        }
+                        break;
+                    case 6://List tickets
+                        if (noTickets)
+                        {
+                            ui.NoTickets();
+                        }
+                        else
+                        {
+                            ui.OutputListable(app.GetTickets());
+                        }
+                        break;
+                    case 7://Load session
+                        ui.OutputListable(sessions);
+                        app = file.Load(sessions[ui.PickList(sessions.Length)]);
+                        ui = new PresentationLayer(app);
+                        break;
+                    case 8: //Save session
+                        ui.OutputListable(sessions);
+                        file.Save(app.GetPieces(), app.GetTickets(), sessions[ui.PickList(sessions.Length)]);
+                        break;
+                    case 9: //End day
+                        if (app.OpenTicketExists())
+                        {
+                            Ticket[] open = app.GetOpenTickets();
+
+                            foreach (Ticket ticket in open)
+                            {
+                                ticket.endWork();
+                            }
+                        }
+                        ui.OutputListable(sessions);
+                        file.Save(app.GetPieces(), app.GetTickets(), sessions[ui.PickList(sessions.Length)]);
+                        return;
+                    case 10: // recalc ticket-durations
+                        if (app.ClosedTicketExists())
+                        {
+                            Ticket[] closed = app.GetClosedTickets();
+                            foreach(Ticket ticket in closed)
+                            {
+                                ticket.CalculateDuration();
+                            }
+                        }
+                        break;
+                        
+                }
+            }
+        }
+    }
+    #endregion //Program
+    interface uiListable
+    {
+        string GetHeader();
+    }
+    class Piece : uiListable
+    {
+        public string order { get; set; }
+        public string project { get; set; }
+        public string text { get; set; }
+        private Guid g;
+        public Piece(string o, string p, string t)
+        {
+            this.order = o;
+            this.project = p;
+            this.text = t;
+            g = Guid.NewGuid();
+        }
+        public override string ToString()
+        {
+            return string.Format("{0}\t{1}\t{2}", project, order, text);
+        }
+        public string GetHeader()
+        {
+            return string.Format("{0}\t{1}\t{2}", "project", "order", "text");
+        }
+    }
+    class Ticket : uiListable
+    {
+        private Piece work;
+        private DateTime start;
+        private DateTime end;
+        private string duration = "";
+        private bool closed = false;
+
+        public Piece Work{ get { return this.work; } set { this.work = value; } }
+        public DateTime Start { get { return this.start; } }
+        public DateTime End { get { return this.end; } }
+        public string Duration { get { return this.duration; } }
+        public bool Closed { get { return this.closed; } }
+        public Ticket(Piece p)
+        {
+            this.work = p;
+            start = DateTime.Now;
+        }
+        [JsonConstructor]
+        public Ticket(Piece work, DateTime start, DateTime end, string duration, bool closed)
+        {
+            this.work = work;
+            this.start = start;
+            this.end = end;
+            this.duration = duration;
+            this.closed = closed;
+        }
+
+        public bool worksAt(Piece p)
+        {
+            return this.work == p;
+        }
+        public override string ToString()
+        {
+            string sEnd;
+            if (!closed)
+            {
+                sEnd = "";
+            }else
+            {
+                sEnd = string.Format("{0} {1}",end.ToShortDateString(), end.ToLongTimeString());
+            }
+            string sStart = string.Format("{0} {1}", start.ToShortDateString(), start.ToLongTimeString());
+            return string.Format("{0}\t{1}\t{2}\t{3}", work.text, sStart, sEnd, duration);
+        }
+        public void endWork()
+        {
+            if (!closed)
+            {
+                closed = true;
+                this.end = DateTime.Now;
+                CalculateDuration();
+            }
+        }
+        public void CalculateDuration()
+        {
+            if (closed)
+            {
+                TimeSpan tsDuration = end - start;
+                duration = string.Format("{0}", (int)tsDuration.TotalMinutes);
+            }
+        }
+        public string GetHeader()
+        {
+            return string.Format("{0}\t{1}\t{2}\t{3}", "text", "start", "end", "duration");
+        }
+    }
+    class Session : uiListable
+    {
+        private string name;
+        public string Name { get { return this.name; } }
+        public Session(string name)
+        {
+            this.name = name;
+        }
+        public string GetHeader()
+        {
+            return string.Format("{0}", "name");
+        }
+        public override string ToString()
+        {
+            return string.Format("{0}", name);
+        }
+    }
+    class SessionContent
+    {
+        public Piece[] pieces;
+        public Ticket[] tickets;
+        public int[] indices;
+        public SessionContent(Ticket[] t, Piece[] p)
+        {
+            pieces = p;
+            if (t != null)
+            {
+                tickets = t;
+                indices = new int[tickets.Length];
+                int i = 0;
+                foreach (Ticket ticket in tickets)
+                {
+                    int j = 0;
+                    foreach (Piece piece in pieces)
+                    {
+                        if (ticket.Work == piece)
+                        {
+                            indices[i] = j;
+                        }
+                        j++;
+                    }
+                    i++;
+                }
+            }
+            else
+            {
+                tickets = null;
+                indices = null;
+            }
+        }
+        [JsonConstructor]
+        public SessionContent(Ticket[] tickets, Piece[] pieces, int[] indices)
+        {
+            this.tickets = tickets;
+            this.pieces = pieces;
+            int i = 0;
+            if (indices != null)
+            {
+                foreach (int index in indices)
+                {
+                    this.tickets[i].Work = this.pieces[index];
+                }
+            }
+        }
+    }
+    #region Presentation
+    class PresentationLayer
+    {
+        private ApplicationLayer app;
+        public PresentationLayer(ApplicationLayer a)
+        {
+            this.app = a;
+        }
+        public void OutputListable(uiListable[] objects)
+        {
+            Console.WriteLine(string.Format("{0}\t{1}", "index", objects[0].GetHeader()));
+            int i = 0;
+            foreach (uiListable @object in objects)
+            {
+                Console.WriteLine(string.Format("{0}\t{1}", i, @object.ToString()));
+                i++;
+            }
+        }
+        public void OutputPiecesSmall(Piece[] pieces)
+        {
+            Console.WriteLine(string.Format("{0}\t{1}", "index", "text"));
+            int i = 0;
+            foreach (Piece piece in pieces)
+            {
+                Console.WriteLine(string.Format("{0}\t{1}", i, piece.text));
+                i++;
+            }
+        }
+        public Piece CreatePiece()
+        {
+            Console.WriteLine(string.Format("{0}", "Project:"));
+            string proj = Console.ReadLine();
+            Console.WriteLine(string.Format("{0}", "Order:"));
+            string ord = Console.ReadLine();
+            Console.WriteLine(string.Format("{0}", "Text:"));
+            string txt = Console.ReadLine();
+            return new Piece(ord, proj, txt);
+        }
+        public Piece EditPiece(Piece piece)
+        {
+            string proj = EditField("Project:", piece.project);
+            string ord = EditField("Order:", piece.order);
+            string txt = EditField("Text:", piece.text);
+            piece.project = proj;
+            piece.order = ord;
+            piece.text = txt;
+            return piece;
+        }
+        public Piece EditPiece(Piece[] pieces)
+        {
+            OutputListable(pieces);
+            return EditPiece(pieces[PickList(pieces.Length)]);
+        }
+        public Piece DeletePiece(Piece piece)
+        {
+            if (app.ticketExists(piece))
+            {
+                Console.WriteLine(string.Format("{0}", "There are already tickets for this piece:"));
+                Ticket[] tickets = app.GetTicketsByPiece(piece);
+                OutputListable(tickets);
+                if (Confirm(string.Format("{0}", "Delete piece and tickets?")))
+                {
+                    app.DeleteTickets(tickets);
+                    Console.WriteLine(string.Format("{0}", "Tickets Deleted"));
+                    return DeletePiece(piece);
+                }
+                else
+                {
+                    return null;
+                }
+            }
+            else
+            {
+                if (Confirm(string.Format("Delete: {0}?", piece.text)))
+                {
+                    return piece;
+                }
+                else
+                {
+                    return null;
+                }
+            }
+        }
+        public Piece DeletePiece(Piece[] pieces)
+        {
+            OutputListable(pieces);
+            return DeletePiece(pieces[PickList(pieces.Length)]);
+        }
+        public Ticket startWork(Piece[] pieces)
+        {
+            OutputPiecesSmall(pieces);
+            return new Ticket(pieces[PickList(pieces.Length)]);
+        }
+        public Ticket[] endWork(Ticket[] tickets)
+        {
+            OutputListable(tickets);
+            tickets[PickList(tickets.Length)].endWork();
+            return tickets;
+        }
+        public int OutputMenu()
+        {
+            Console.WriteLine(string.Format("{0}", "Welcome to CATerpillar, pick your poison:"));
+            Console.WriteLine(string.Format("{0}", "0\tStart working on a piece"));
+            Console.WriteLine(string.Format("{0}", "1\tEnd working on a piece"));
+            Console.WriteLine(string.Format("{0}", "2\tCreate a new piece"));
+            Console.WriteLine(string.Format("{0}", "3\tEdit a existing piece"));
+            Console.WriteLine(string.Format("{0}", "4\tDelete a existing piece (and all time-tickets for that piece)"));
+            Console.WriteLine(string.Format("{0}", "5\tSee a list of all pieces"));
+            Console.WriteLine(string.Format("{0}", "6\tSee a list of all tickets"));
+            Console.WriteLine(string.Format("{0}", "7\tLoad session from a file"));
+            Console.WriteLine(string.Format("{0}", "8\tSave session to a file"));
+            Console.WriteLine(string.Format("{0}", "9\tEnd the day: End the work on all started pieces, save session to file and exit"));
+            return 11;
+        }
+        public bool Confirm(string prompt)
+        {
+            Console.WriteLine(string.Format("{0} Y(es)/N(o):", prompt));
+            while (true)
+            {
+                string answer = Console.ReadLine();
+                if (answer.Equals("Y")) { return true; }
+                if (answer.Equals("N")) { return false; }
+            }
+        }
+        public int PickList(int elements)
+        {
+            Console.WriteLine(string.Format("{0}", "Pick an element from the list"));
+            while (true)
+            {
+                string sAnswer = Console.ReadLine();
+                int answer;
+                if (int.TryParse(sAnswer, out answer) && 0 <= answer && answer < elements)
+                {
+                    return answer;
+                }
+            }
+        }
+        public string EditField(string prompt, string oldValue)
+        {
+            Console.WriteLine(string.Format("{0}", prompt));
+            Console.WriteLine(string.Format("({0})", oldValue));
+            string newValue = Console.ReadLine();
+            if (newValue.Equals(""))
+            {
+                if (Confirm(string.Format("{0}: {1}", "Keep", oldValue)))
+                {
+                    return oldValue;
+                }
+                else
+                {
+                    return "";
+                }
+            }
+            return newValue;
+        }
+
+        internal void NoPieces()
+        {
+            Console.WriteLine(string.Format("{0}", "No pieces yet"));
+        }
+
+        internal void NoTickets()
+        {
+            Console.WriteLine(string.Format("{0}", "No tickets yet"));
+        }
+    }
+    #endregion //Presentation
+    #region Persistency
+    class PersistencyLayer
+    {
+        public Session[] GetFiles()
+        {
+            string[] paths = Directory.GetFiles(".\\saves", "*.json");
+            Session[] sessions = new Session[paths.Length];
+            int i = 0;
+            foreach (string path in paths)
+            {
+                sessions[i] = new Session(Path.GetFileNameWithoutExtension(path));
+                i++;
+            }
+            return sessions;
+        }
+        public void Save(Piece[] pieces, Ticket[] tickets, Session session)
+        {
+            SessionContent content = new SessionContent(tickets, pieces);
+            string jcontent = JsonConvert.SerializeObject(content, Formatting.Indented);
+            File.WriteAllText(string.Format(".\\saves\\{0}.json", session.Name), jcontent);    
+        }
+        public ApplicationLayer Load(Session session)
+        {
+            string jcontent = File.ReadAllText(string.Format(".\\saves\\{0}.json", session.Name));
+            SessionContent content = JsonConvert.DeserializeObject<SessionContent>(jcontent);
+
+            return new ApplicationLayer(content.tickets, content.pieces);
+        }
+
+    }
+    #endregion //Persistency
+    #region Application
+    class ApplicationLayer
+    {
+        private Ticket[] tickets;
+        private Piece[] pieces;
+        public ApplicationLayer() { }
+        public ApplicationLayer(Ticket[] tickets, Piece[] pieces)
+        {
+            this.tickets = tickets;
+            this.pieces = pieces;
+        }
+        public Ticket[] GetTickets()
+        {
+            return tickets;
+        }
+        public Ticket[] GetOpenTickets()
+        {
+            if (tickets == null) return null;
+            Ticket[] openTickets = new Ticket[CountOpenTickets()];
+            int i = 0;
+            foreach (Ticket ticket in tickets)
+            {
+                if (!ticket.Closed) { openTickets[i] = ticket; i++; }
+            }
+            return openTickets;
+        }
+        public Ticket[] GetClosedTickets()
+        {
+            if (tickets == null) return null;
+            Ticket[] closedTickets = new Ticket[CountClosedTickets()];
+            int i = 0;
+            foreach (Ticket ticket in tickets)
+            {
+                if (ticket.Closed) { closedTickets[i] = ticket; i++; }
+            }
+            return closedTickets;
+        }
+        public Ticket[] GetTicketsByPiece(Piece piece)
+        {
+            Ticket[] filteredTickets = new Ticket[countTicketsWorkingAt(piece)];
+            int i = 0;
+            foreach (Ticket ticket in tickets)
+            {
+                if (ticket.worksAt(piece)) { filteredTickets[i] = ticket; i++; }
+            }
+            return filteredTickets;
+        }
+        public Piece[] GetPieces()
+        {
+            return pieces;
+        }
+        public void AddTicket(Ticket t)
+        {
+            if (tickets == null)
+            {
+                tickets = new Ticket[1];
+                tickets[0] = t;
+            }
+            else
+            {
+                Ticket[] newTickets = new Ticket[this.tickets.Length + 1];
+                int i = 0;
+                foreach (Ticket ticket in this.tickets)
+                {
+                    newTickets[i] = ticket;
+                    i++;
+                }
+                newTickets[i] = t;
+                this.tickets = newTickets;
+            }
+        }
+        public void DeleteTickets(Ticket[] tickets)
+        {
+            Ticket[] newTickets = new Ticket[this.tickets.Length - tickets.Length];
+            bool del;
+            int i = 0;
+            foreach (Ticket oldTicket in this.tickets)
+            {
+                del = false;
+                foreach (Ticket badTicket in tickets)
+                {
+                    if (oldTicket == badTicket) del = true;
+                }
+                if (!del)
+                {
+                    newTickets[i] = oldTicket;
+                    i++;
+                }
+            }
+            this.tickets = newTickets;
+        }
+        public void AddPiece(Piece p)
+        {
+            if (this.pieces == null)
+            {
+                this.pieces = new Piece[1];
+                this.pieces[0] = p;
+            }
+            else
+            {
+                Piece[] newPieces = new Piece[this.pieces.Length + 1];
+                int i = 0;
+                foreach (Piece piece in this.pieces)
+                {
+                    newPieces[i] = piece;
+                    i++;
+                }
+                newPieces[i] = p;
+                this.pieces = newPieces;
+            }
+        }
+        public void DeletePiece(Piece p)
+        {
+            if (this.pieces.Length == 1)
+            {
+                this.pieces = null;
+            }
+            else
+            {
+                Piece[] newPieces = new Piece[pieces.Length - 1];
+                int i = 0;
+                foreach (Piece oldPiece in pieces)
+                {
+                    if (oldPiece != p)
+                    {
+                        newPieces[i] = oldPiece;
+                        i++;
+                    }
+                }
+                this.pieces = newPieces;
+            }
+        }
+        public bool OpenTicketExists()
+        {
+            if (tickets == null) return false;
+            foreach (Ticket ticket in tickets)
+            {
+                if (!ticket.Closed) { return true; }
+            }
+            return false;
+        }
+        public bool ClosedTicketExists()
+        {
+            if (tickets == null) return false;
+            foreach (Ticket ticket in tickets)
+            {
+                if (ticket.Closed) { return true; }
+            }
+            return false;
+        }
+        public bool ticketExists(Piece piece)
+        {
+            foreach (Ticket ticket in tickets)
+            {
+                if (ticket.worksAt(piece)) { return true; }
+            }
+            return false;
+        }
+        public int CountOpenTickets()
+        {
+            if(tickets != null)
+            {
+                int i = 0;
+                foreach (Ticket ticket in tickets)
+                {
+                    if (!ticket.Closed) { i++; }
+                }
+                return i;
+            }
+            else
+            {
+                return 0;
+            }
+            
+        }
+        public int CountClosedTickets()
+        {
+            if (tickets != null)
+            {
+                int i = 0;
+                foreach (Ticket ticket in tickets)
+                {
+                    if (ticket.Closed) { i++; }
+                }
+                return i;
+            }
+            else
+            {
+                return 0;
+            }
+
+        }
+        public int countTicketsWorkingAt(Piece piece)
+        {
+            if (tickets != null)
+            {
+                int i = 0;
+                foreach (Ticket ticket in tickets)
+                {
+                    if (ticket.worksAt(piece)) { i++; }
+                }
+                return i;
+            }else
+            {
+                return 0;
+            }
+            
+        }
+        
+    }
+    #endregion //Application
+}
