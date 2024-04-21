@@ -1,6 +1,6 @@
 ﻿using System;
 using System.IO;
-using Newtonsoft.Json;
+using System.Text.Json;
 namespace CATerpillar.Program
 {
     class Program
@@ -388,7 +388,7 @@ namespace CATerpillar.Program
             this.work = p;
             start = DateTime.Now;
         }
-        [JsonConstructor]
+        
         public Ticket(Piece work, DateTime start, DateTime end, string duration, bool closed)
         {
             this.work = work;
@@ -495,7 +495,6 @@ namespace CATerpillar.Program
                 indices = null;
             }
         }
-        [JsonConstructor]
         public SessionContent(Ticket[] tickets, Piece[] pieces, int[] indices)
         {
             this.tickets = tickets;
@@ -625,13 +624,13 @@ namespace CATerpillar.Program
         public void Save(Piece[] pieces, Ticket[] tickets, Session session)
         {
             SessionContent content = new SessionContent(tickets, pieces);
-            string jcontent = JsonConvert.SerializeObject(content, Formatting.Indented);
+            string jcontent = JsonSerializer.Serialize(content);
             File.WriteAllText(string.Format(".\\saves\\{0}.json", session.Name), jcontent);
         }
         public ApplicationLayer Load(Session session)
         {
             string jcontent = File.ReadAllText(string.Format(".\\saves\\{0}.json", session.Name));
-            SessionContent content = JsonConvert.DeserializeObject<SessionContent>(jcontent);
+            SessionContent content = JsonSerializer.Deserialize<SessionContent>(jcontent);
             ApplicationLayer app = new ApplicationLayer(content.tickets, content.pieces);
             Ticket[] closed = app.FilterTicketsBy((t) => t.Closed);
             if (closed != null)
