@@ -125,7 +125,7 @@ namespace CATerpillar.Program
                 return menu.Parent;
             }
             OutputMenu(menu);
-            Console.WriteLine(string.Format("{0}", "Pick an element from the list"));
+            Console.WriteLine(string.Format("{0}", "Pick an element from the list (exit by inputing ..)"));
             while (true)
             {
                 string sAnswer = Console.ReadLine();
